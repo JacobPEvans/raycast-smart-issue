@@ -1,0 +1,127 @@
+import { generateIssue, GenerateStats, getAvailableModel, sanitizeInput } from "./ollama";
+import { createIssue, getOpenIssues, getRepo, getRepoLabels, searchSimilar } from "./github";
+import { buildPrompt } from "./prompt";
+import { CreateResult, getSuggestedLabels, issueToMarkdown, LabelSet, Repo } from "./types";
+
+export interface CorePreferences {
+  githubToken: string;
+  ollamaUrl: string;
+  model: string;
+  fallbackModel: string;
+}
+
+export interface CoreInput {
+  repoFullName: string;
+  idea: string;
+  priorityHint?: string;
+  onStatus?: (message: string) => void;
+}
+
+export async function createSmartIssue(input: CoreInput, prefs: CorePreferences): Promise<CreateResult> {
+  const status = input.onStatus ?? (() => undefined);
+
+  status(`Connecting to ${input.repoFullName}...`);
+  let repo: Repo;
+  try {
+    repo = await getRepo(prefs.githubToken, input.repoFullName);
+  } catch (err) {
+    return { success: false, error: formatError(err, "github") };
+  }
+
+  status("Fetching open issues...");
+  let openIssues: string[] = [];
+  try {
+    openIssues = await getOpenIssues(prefs.githubToken, repo);
+  } catch {
+    // Non-fatal — continue without open issues context
+  }
+
+  status("Fetching available labels...");
+  let labelSet: LabelSet = { typeLabels: [], priorityLabels: [], sizeLabels: [], aiLabels: [], otherLabels: [] };
+  try {
+    labelSet = await getRepoLabels(prefs.githubToken, repo);
+  } catch {
+    // Non-fatal — continue without label context
+  }
+
+  status("Searching for similar issues...");
+  const keywords = input.idea.replace(/\W+/g, " ").trim().slice(0, 100);
+  let similar = [];
+  try {
+    similar = await searchSimilar(prefs.githubToken, repo, keywords);
+  } catch {
+    // Non-fatal
+  }
+
+  status("Generating issue with AI...");
+  const idea = sanitizeInput(input.idea);
+  const model = await getAvailableModel(prefs.model, prefs.fallbackModel, prefs.ollamaUrl);
+  const prompt = buildPrompt({ idea, repo, openIssues, similar, labelSet, priorityHint: input.priorityHint });
+
+  let result: Awaited<ReturnType<typeof generateIssue>>;
+  try {
+    result = await generateIssue(prompt, model, prefs.ollamaUrl);
+  } catch (err) {
+    return { success: false, error: formatError(err, "ollama") };
+  }
+
+  if (result.duplicateOf !== null) {
+    return { success: false, duplicateOf: result.duplicateOf, error: `Duplicate of #${result.duplicateOf}` };
+  }
+
+  if (!result.issue) {
+    return { success: false, error: "AI did not return an issue" };
+  }
+
+  const issue = result.issue;
+  const stats: GenerateStats = result.stats;
+
+  // Resolve final labels
+  const allValid = [
+    ...labelSet.typeLabels,
+    ...labelSet.priorityLabels,
+    ...labelSet.sizeLabels,
+    ...labelSet.aiLabels,
+    ...labelSet.otherLabels,
+  ];
+  const suggested = getSuggestedLabels(issue).filter((l) => allValid.includes(l));
+
+  // Always add ai:ready if available
+  if (labelSet.aiLabels.includes("ai:ready") && !suggested.includes("ai:ready")) {
+    suggested.push("ai:ready");
+  } else if (allValid.includes("human reviewed") && !suggested.includes("human reviewed")) {
+    suggested.push("human reviewed");
+  }
+
+  status(`Creating issue with labels: ${suggested.join(", ") || "none"}...`);
+  let created: Awaited<ReturnType<typeof createIssue>>;
+  try {
+    created = await createIssue(prefs.githubToken, repo, issue.title, issueToMarkdown(issue), suggested);
+  } catch (err) {
+    return { success: false, error: formatError(err, "github") };
+  }
+
+  return {
+    success: true,
+    issueNumber: created.number,
+    url: created.url,
+    title: issue.title,
+    summary: issue.summary,
+    model: `${model} (${stats.tokensPerSec.toFixed(1)} tok/s)`,
+    similar,
+  };
+}
+
+function formatError(err: unknown, context: "github" | "ollama"): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (context === "ollama") {
+    return `${msg}\n\nTip: Ensure Ollama is running (ollama serve)`;
+  }
+  if (context === "github") {
+    if (msg.toLowerCase().includes("auth") || msg.toLowerCase().includes("401")) {
+      return `${msg}\n\nTip: Check your GitHub token in Raycast preferences`;
+    }
+    return msg;
+  }
+  return msg;
+}

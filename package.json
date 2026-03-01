@@ -1,0 +1,74 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "smart-issue",
+  "title": "Smart Issue Creator",
+  "description": "AI-powered GitHub issue creation using local Ollama models",
+  "icon": "icon.png",
+  "author": "JacobPEvans",
+  "license": "MIT",
+  "categories": ["Developer Tools", "Productivity"],
+  "commands": [
+    {
+      "name": "create-issue",
+      "title": "Create Smart Issue",
+      "description": "Generate and create a GitHub issue from a brief idea",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "githubToken",
+      "title": "GitHub Token",
+      "description": "Personal access token with 'repo' scope",
+      "type": "password",
+      "required": true
+    },
+    {
+      "name": "githubOrg",
+      "title": "GitHub Organization/User",
+      "description": "Your GitHub username or org for fetching repos",
+      "type": "textfield",
+      "required": true
+    },
+    {
+      "name": "ollamaUrl",
+      "title": "Ollama URL",
+      "description": "Ollama API endpoint",
+      "type": "textfield",
+      "default": "http://localhost:11434",
+      "required": false
+    },
+    {
+      "name": "model",
+      "title": "AI Model",
+      "description": "Ollama model for issue generation",
+      "type": "textfield",
+      "default": "llama4:latest",
+      "required": false
+    },
+    {
+      "name": "fallbackModel",
+      "title": "Fallback Model",
+      "description": "Used when primary model is unavailable",
+      "type": "textfield",
+      "default": "llama3.2:latest",
+      "required": false
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.87.0",
+    "@raycast/utils": "^1.17.0",
+    "@octokit/rest": "^21.0.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.0",
+    "typescript": "^5.4.5",
+    "@types/node": "22.x"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix"
+  }
+}

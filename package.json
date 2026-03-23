@@ -62,7 +62,7 @@
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.0",
-    "typescript": "^5.4.5",
+    "typescript": "^6.0.0",
     "@types/node": "25.x"
   },
   "scripts": {

@@ -11,8 +11,8 @@ import {
 } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { createSmartIssue } from "./lib/core";
-import { getRepos } from "./lib/github";
-import { CreateResult, Repo } from "./lib/types";
+import { getRepoLabels, getRepos } from "./lib/github";
+import { CreateResult, LabelSet, Repo } from "./lib/types";
 
 interface Prefs {
   githubToken: string;
@@ -37,6 +37,7 @@ export default function CreateIssueCommand() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [reposLoading, setReposLoading] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
+  const [labelSet, setLabelSet] = useState<LabelSet | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -53,7 +54,25 @@ export default function CreateIssueCommand() {
     load();
   }, [prefs.githubToken, prefs.githubOrg]);
 
-  async function handleSubmit(values: { repo: string; priority: string; idea: string }) {
+  async function handleRepoChange(repoFullName: string) {
+    if (!repoFullName) {
+      setLabelSet(null);
+      return;
+    }
+    const repoName = repoFullName.split("/")[1];
+    try {
+      const labels = await getRepoLabels(prefs.githubToken, {
+        name: repoName,
+        fullName: repoFullName,
+        description: "",
+      });
+      setLabelSet(labels);
+    } catch {
+      setLabelSet(null);
+    }
+  }
+
+  async function handleSubmit(values: { repo: string; type: string; priority: string; size: string; idea: string }) {
     if (!values.repo) {
       await showToast({ style: Toast.Style.Failure, title: "Select a repository" });
       return;
@@ -74,6 +93,8 @@ export default function CreateIssueCommand() {
         repoFullName: values.repo,
         idea: values.idea,
         priorityHint: values.priority || undefined,
+        typeHint: values.type || undefined,
+        sizeHint: values.size || undefined,
         onStatus: (msg) => {
           toast.message = msg;
         },
@@ -81,8 +102,8 @@ export default function CreateIssueCommand() {
       {
         githubToken: prefs.githubToken,
         ollamaUrl: prefs.ollamaUrl || "http://localhost:11434",
-        model: prefs.model || "llama4:latest",
-        fallbackModel: prefs.fallbackModel || "llama3.2:latest",
+        model: prefs.model || "mlx-community/Qwen3.5-27B-4bit",
+        fallbackModel: prefs.fallbackModel || "",
       }
     );
 
@@ -127,15 +148,32 @@ export default function CreateIssueCommand() {
         </ActionPanel>
       }
     >
-      <Form.Dropdown id="repo" title="Repository" storeValue>
+      <Form.Dropdown id="repo" title="Repository" storeValue onChange={handleRepoChange}>
         {repos.map((r) => (
           <Form.Dropdown.Item key={r.fullName} value={r.fullName} title={r.name} />
         ))}
       </Form.Dropdown>
 
+      <Form.Dropdown id="type" title="Type" storeValue>
+        <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
+        {(labelSet?.typeLabels ?? []).map((l) => (
+          <Form.Dropdown.Item key={l} value={l} title={l} />
+        ))}
+      </Form.Dropdown>
+
       <Form.Dropdown id="priority" title="Priority" storeValue>
-        {PRIORITIES.map((p) => (
-          <Form.Dropdown.Item key={p.value} value={p.value} title={p.label} />
+        <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
+        {(labelSet?.priorityLabels ?? PRIORITIES.slice(1)).map((p) => {
+          const val = typeof p === "string" ? p : p.value;
+          const label = typeof p === "string" ? p : p.label;
+          return <Form.Dropdown.Item key={val} value={val} title={label} />;
+        })}
+      </Form.Dropdown>
+
+      <Form.Dropdown id="size" title="Size" storeValue>
+        <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
+        {(labelSet?.sizeLabels ?? []).map((l) => (
+          <Form.Dropdown.Item key={l} value={l} title={l} />
         ))}
       </Form.Dropdown>
 

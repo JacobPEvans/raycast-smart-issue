@@ -1,13 +1,12 @@
 import { GitHubIssue } from "./types";
 
-interface OllamaGenerateResponse {
-  response: string;
-  eval_count?: number;
-  eval_duration?: number;
+interface ChatCompletionResponse {
+  choices: Array<{ message: { content: string } }>;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
-interface OllamaTagsResponse {
-  models: Array<{ name: string }>;
+interface ModelsResponse {
+  data: Array<{ id: string }>;
 }
 
 export interface GenerateStats {
@@ -33,12 +32,13 @@ export async function getAvailableModel(
   ollamaUrl: string
 ): Promise<string> {
   try {
-    const resp = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    const resp = await fetch(`${ollamaUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return primaryModel;
-    const data = (await resp.json()) as OllamaTagsResponse;
-    const names = data.models.map((m) => m.name);
+    const data = (await resp.json()) as ModelsResponse;
+    const names = data.data.map((m) => m.id);
 
     for (const preferred of [primaryModel, fallbackModel]) {
+      if (!preferred) continue;
       const base = preferred.split(":")[0];
       if (names.includes(preferred) || names.some((n) => n.startsWith(base))) {
         return preferred;
@@ -60,39 +60,41 @@ export async function generateIssue(prompt: string, model: string, ollamaUrl: st
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
-  let raw: OllamaGenerateResponse;
+  const startTime = Date.now();
+  let raw: ChatCompletionResponse;
   try {
-    const resp = await fetch(`${ollamaUrl}/api/generate`, {
+    const resp = await fetch(`${ollamaUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        prompt,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: 2048,
         stream: false,
-        options: { temperature: 0, num_predict: 2048 },
       }),
       signal: controller.signal,
     });
     if (!resp.ok) {
       const text = await resp.text();
-      throw new Error(`Ollama returned ${resp.status}: ${text}`);
+      throw new Error(`LLM server returned ${resp.status}: ${text}`);
     }
-    raw = (await resp.json()) as OllamaGenerateResponse;
+    raw = (await resp.json()) as ChatCompletionResponse;
   } finally {
     clearTimeout(timer);
   }
 
-  const evalCount = raw.eval_count ?? 0;
-  const evalDurationSec = (raw.eval_duration ?? 0) / 1e9;
+  const durationSec = (Date.now() - startTime) / 1000;
+  const tokenCount = raw.usage?.completion_tokens ?? 0;
   const stats: GenerateStats = {
-    tokens: evalCount,
-    durationSec: evalDurationSec,
-    tokensPerSec: evalDurationSec > 0 ? evalCount / evalDurationSec : 0,
+    tokens: tokenCount,
+    durationSec,
+    tokensPerSec: durationSec > 0 ? tokenCount / durationSec : 0,
     model,
   };
 
-  const content = raw.response?.trim();
-  if (!content) throw new Error("Ollama returned empty response");
+  const content = raw.choices?.[0]?.message?.content?.trim();
+  if (!content) throw new Error("LLM server returned empty response");
 
   // Check for duplicate
   if (content.startsWith("DUPLICATE:#")) {

@@ -12,11 +12,11 @@ type ExtensionPreferences = {
   "githubToken": string,
   /** GitHub Organization/User - Your GitHub username or org for fetching repos */
   "githubOrg": string,
-  /** Ollama URL - Ollama API endpoint */
+  /** LLM Server URL - Local LLM inference endpoint (OpenAI-compatible) */
   "ollamaUrl": string,
-  /** AI Model - Ollama model for issue generation */
+  /** AI Model - Model for issue generation */
   "model": string,
-  /** Fallback Model - Used when primary model is unavailable */
+  /** Fallback Model - Used when primary model is unavailable (empty = auto-detect) */
   "fallbackModel": string
 }
 

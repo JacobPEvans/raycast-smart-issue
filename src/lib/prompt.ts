@@ -7,6 +7,8 @@ export interface PromptContext {
   similar: SimilarIssue[];
   labelSet: LabelSet;
   priorityHint?: string;
+  typeHint?: string;
+  sizeHint?: string;
 }
 
 export function buildPrompt(ctx: PromptContext): string {
@@ -33,8 +35,12 @@ export function buildPrompt(ctx: PromptContext): string {
   }
 
   let preferenceHints = "";
-  if (ctx.priorityHint) {
-    preferenceHints = `\nUSER PREFERENCES (you can override with reasoning):\n  - User hints at ${ctx.priorityHint} (but override if needed)\n`;
+  const hints: string[] = [];
+  if (ctx.typeHint) hints.push(`User prefers ${ctx.typeHint} (but override if inappropriate)`);
+  if (ctx.priorityHint) hints.push(`User hints at ${ctx.priorityHint} (but override if needed)`);
+  if (ctx.sizeHint) hints.push(`User suggests ${ctx.sizeHint} (but override if inaccurate)`);
+  if (hints.length > 0) {
+    preferenceHints = `\nUSER PREFERENCES (you can override with reasoning):\n${hints.map((h) => `  - ${h}`).join("\n")}\n`;
   }
 
   const ideaParsingInstructions = `

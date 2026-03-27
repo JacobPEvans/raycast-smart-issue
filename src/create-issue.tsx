@@ -24,6 +24,12 @@ interface Prefs {
 
 const DEFAULT_PRIORITIES = ["priority:critical", "priority:high", "priority:medium", "priority:low"];
 
+/** Strip "type:", "priority:", "size:" prefix and capitalize for display. */
+function labelDisplayName(label: string): string {
+  const stripped = label.replace(/^(type|priority|size):/, "");
+  return stripped.length <= 2 ? stripped.toUpperCase() : stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 export default function CreateIssueCommand() {
   const prefs = getPreferenceValues<Prefs>();
   const { push } = useNavigation();
@@ -148,21 +154,21 @@ export default function CreateIssueCommand() {
       <Form.Dropdown id="type" title="Type" storeValue>
         <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
         {(labelSet?.typeLabels ?? []).map((l) => (
-          <Form.Dropdown.Item key={l} value={l} title={l} />
+          <Form.Dropdown.Item key={l} value={l} title={labelDisplayName(l)} />
         ))}
       </Form.Dropdown>
 
       <Form.Dropdown id="priority" title="Priority" storeValue>
         <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
         {(labelSet?.priorityLabels ?? DEFAULT_PRIORITIES).map((l) => (
-          <Form.Dropdown.Item key={l} value={l} title={l} />
+          <Form.Dropdown.Item key={l} value={l} title={labelDisplayName(l)} />
         ))}
       </Form.Dropdown>
 
       <Form.Dropdown id="size" title="Size" storeValue>
         <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
         {(labelSet?.sizeLabels ?? []).map((l) => (
-          <Form.Dropdown.Item key={l} value={l} title={l} />
+          <Form.Dropdown.Item key={l} value={l} title={labelDisplayName(l)} />
         ))}
       </Form.Dropdown>
 

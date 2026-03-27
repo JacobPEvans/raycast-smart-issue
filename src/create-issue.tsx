@@ -9,7 +9,7 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
 import { CreateResult, LabelSet } from "./lib/types";
@@ -38,6 +38,7 @@ export default function CreateIssueCommand() {
   const [reposLoading, setReposLoading] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
   const [labelSet, setLabelSet] = useState<LabelSet | null>(null);
+  const latestRepoRef = useRef("");
 
   useEffect(() => {
     async function load() {
@@ -55,14 +56,17 @@ export default function CreateIssueCommand() {
   }, [prefs.githubToken, prefs.githubOrg]);
 
   async function handleRepoChange(repoFullName: string) {
+    latestRepoRef.current = repoFullName;
     if (!repoFullName) {
       setLabelSet(null);
       return;
     }
     try {
       const labels = await getRepoLabels(prefs.githubToken, repoFullName);
+      if (latestRepoRef.current !== repoFullName) return; // stale response
       setLabelSet(labels);
     } catch {
+      if (latestRepoRef.current !== repoFullName) return;
       setLabelSet(null);
       await showToast({ style: Toast.Style.Failure, title: "Failed to load labels" });
     }

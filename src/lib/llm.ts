@@ -29,10 +29,10 @@ function sanitizeInput(text: string): string {
 export async function getAvailableModel(
   primaryModel: string,
   fallbackModel: string,
-  ollamaUrl: string
+  llmUrl: string
 ): Promise<string> {
   try {
-    const resp = await fetch(`${ollamaUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
+    const resp = await fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return primaryModel;
     const data = (await resp.json()) as ModelsResponse;
     const names = data.data.map((m) => m.id);
@@ -63,7 +63,7 @@ export async function generateIssue(prompt: string, model: string, ollamaUrl: st
   const startTime = Date.now();
   let raw: ChatCompletionResponse;
   try {
-    const resp = await fetch(`${ollamaUrl}/v1/chat/completions`, {
+    const resp = await fetch(`${llmUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

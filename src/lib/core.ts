@@ -5,7 +5,7 @@ import { CreateResult, getSuggestedLabels, issueToMarkdown, LabelSet, Repo } fro
 
 export interface CorePreferences {
   githubToken: string;
-  ollamaUrl: string;
+  ollamaUrl: string; // legacy key name — actually any OpenAI-compatible endpoint
   model: string;
   fallbackModel: string;
 }
@@ -16,6 +16,7 @@ export interface CoreInput {
   priorityHint?: string;
   typeHint?: string;
   sizeHint?: string;
+  cachedLabelSet?: LabelSet;
   onStatus?: (message: string) => void;
 }
 
@@ -30,35 +31,32 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
     return { success: false, error: formatError(err, "github") };
   }
 
-  status("Fetching open issues...");
-  let openIssues: string[] = [];
-  try {
-    openIssues = await getOpenIssues(prefs.githubToken, repo);
-  } catch {
-    // Non-fatal — continue without open issues context
-  }
-
-  status("Fetching available labels...");
-  let labelSet: LabelSet = { typeLabels: [], priorityLabels: [], sizeLabels: [], aiLabels: [], otherLabels: [] };
-  try {
-    labelSet = await getRepoLabels(prefs.githubToken, repo);
-  } catch {
-    // Non-fatal — continue without label context
-  }
-
-  status("Searching for similar issues...");
+  // Fetch context in parallel — these are independent
+  status("Fetching context...");
   const keywords = input.idea.replace(/\W+/g, " ").trim().slice(0, 100);
-  let similar = [];
-  try {
-    similar = await searchSimilar(prefs.githubToken, repo, keywords);
-  } catch {
-    // Non-fatal
-  }
+  const emptyLabelSet: LabelSet = { typeLabels: [], priorityLabels: [], sizeLabels: [], aiLabels: [], otherLabels: [] };
+
+  const [openIssues, labelSet, similar, model] = await Promise.all([
+    getOpenIssues(prefs.githubToken, repo).catch(() => [] as string[]),
+    input.cachedLabelSet
+      ? Promise.resolve(input.cachedLabelSet)
+      : getRepoLabels(prefs.githubToken, repo.fullName).catch(() => emptyLabelSet),
+    searchSimilar(prefs.githubToken, repo, keywords).catch(() => []),
+    getAvailableModel(prefs.model, prefs.fallbackModel, prefs.ollamaUrl),
+  ]);
 
   status("Generating issue with AI...");
   const idea = sanitizeInput(input.idea);
-  const model = await getAvailableModel(prefs.model, prefs.fallbackModel, prefs.ollamaUrl);
-  const prompt = buildPrompt({ idea, repo, openIssues, similar, labelSet, priorityHint: input.priorityHint, typeHint: input.typeHint, sizeHint: input.sizeHint });
+  const prompt = buildPrompt({
+    idea,
+    repo,
+    openIssues,
+    similar,
+    labelSet,
+    priorityHint: input.priorityHint,
+    typeHint: input.typeHint,
+    sizeHint: input.sizeHint,
+  });
 
   let result: Awaited<ReturnType<typeof generateIssue>>;
   try {

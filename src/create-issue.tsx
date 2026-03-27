@@ -12,7 +12,7 @@ import {
 import { useEffect, useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
-import { CreateResult, LabelSet, Repo } from "./lib/types";
+import { CreateResult, LabelSet } from "./lib/types";
 
 interface Prefs {
   githubToken: string;
@@ -22,13 +22,7 @@ interface Prefs {
   fallbackModel: string;
 }
 
-const PRIORITIES = [
-  { value: "", label: "Auto (AI decides)" },
-  { value: "priority:critical", label: "Critical" },
-  { value: "priority:high", label: "High" },
-  { value: "priority:medium", label: "Medium" },
-  { value: "priority:low", label: "Low" },
-];
+const DEFAULT_PRIORITIES = ["priority:critical", "priority:high", "priority:medium", "priority:low"];
 
 export default function CreateIssueCommand() {
   const prefs = getPreferenceValues<Prefs>();
@@ -59,16 +53,12 @@ export default function CreateIssueCommand() {
       setLabelSet(null);
       return;
     }
-    const repoName = repoFullName.split("/")[1];
     try {
-      const labels = await getRepoLabels(prefs.githubToken, {
-        name: repoName,
-        fullName: repoFullName,
-        description: "",
-      });
+      const labels = await getRepoLabels(prefs.githubToken, repoFullName);
       setLabelSet(labels);
     } catch {
       setLabelSet(null);
+      await showToast({ style: Toast.Style.Failure, title: "Failed to load labels" });
     }
   }
 
@@ -95,6 +85,7 @@ export default function CreateIssueCommand() {
         priorityHint: values.priority || undefined,
         typeHint: values.type || undefined,
         sizeHint: values.size || undefined,
+        cachedLabelSet: labelSet ?? undefined,
         onStatus: (msg) => {
           toast.message = msg;
         },
@@ -163,11 +154,9 @@ export default function CreateIssueCommand() {
 
       <Form.Dropdown id="priority" title="Priority" storeValue>
         <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
-        {(labelSet?.priorityLabels ?? PRIORITIES.slice(1)).map((p) => {
-          const val = typeof p === "string" ? p : p.value;
-          const label = typeof p === "string" ? p : p.label;
-          return <Form.Dropdown.Item key={val} value={val} title={label} />;
-        })}
+        {(labelSet?.priorityLabels ?? DEFAULT_PRIORITIES).map((l) => (
+          <Form.Dropdown.Item key={l} value={l} title={l} />
+        ))}
       </Form.Dropdown>
 
       <Form.Dropdown id="size" title="Size" storeValue>

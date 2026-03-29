@@ -36,9 +36,9 @@ export async function getRepo(token: string, fullName: string): Promise<Repo> {
   };
 }
 
-export async function getRepoLabels(token: string, repo: Repo): Promise<LabelSet> {
+export async function getRepoLabels(token: string, repoFullName: string): Promise<LabelSet> {
   const octokit = makeOctokit(token);
-  const [owner, repoName] = repo.fullName.split("/");
+  const [owner, repoName] = repoFullName.split("/");
   const resp = await octokit.issues.listLabelsForRepo({ owner, repo: repoName, per_page: 100 });
   return categorizeLabelSet(resp.data.map((l) => l.name));
 }

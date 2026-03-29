@@ -9,10 +9,11 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
+import { useCachedPromise } from "@raycast/utils";
+import { useState } from "react";
 import { createSmartIssue } from "./lib/core";
-import { getRepos } from "./lib/github";
-import { CreateResult, Repo } from "./lib/types";
+import { getRepoLabels, getRepos } from "./lib/github";
+import { CreateResult, LabelSet } from "./lib/types";
 
 interface Prefs {
   githubToken: string;
@@ -22,38 +23,30 @@ interface Prefs {
   fallbackModel: string;
 }
 
-const PRIORITIES = [
-  { value: "", label: "Auto (AI decides)" },
-  { value: "priority:critical", label: "Critical" },
-  { value: "priority:high", label: "High" },
-  { value: "priority:medium", label: "Medium" },
-  { value: "priority:low", label: "Low" },
-];
+const DEFAULT_PRIORITIES = ["priority:critical", "priority:high", "priority:medium", "priority:low"];
+
+/** Strip "type:", "priority:", "size:" prefix and capitalize for display. */
+function labelDisplayName(label: string): string {
+  const stripped = label.replace(/^(type|priority|size):/, "");
+  return stripped.length <= 2 ? stripped.toUpperCase() : stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
 
 export default function CreateIssueCommand() {
   const prefs = getPreferenceValues<Prefs>();
   const { push } = useNavigation();
+  const [selectedRepo, setSelectedRepo] = useState("");
 
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [reposLoading, setReposLoading] = useState(true);
-  const [reposError, setReposError] = useState<string | null>(null);
+  const {
+    data: repos,
+    isLoading: reposLoading,
+    error: reposError,
+  } = useCachedPromise(getRepos, [prefs.githubToken, prefs.githubOrg], { initialData: [] });
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const fetched = await getRepos(prefs.githubToken, prefs.githubOrg);
-        setRepos(fetched);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setReposError(msg);
-      } finally {
-        setReposLoading(false);
-      }
-    }
-    load();
-  }, [prefs.githubToken, prefs.githubOrg]);
+  const { data: labelSet } = useCachedPromise(getRepoLabels, [prefs.githubToken, selectedRepo], {
+    execute: !!selectedRepo,
+  });
 
-  async function handleSubmit(values: { repo: string; priority: string; idea: string }) {
+  async function handleSubmit(values: { repo: string; type: string; priority: string; size: string; idea: string }) {
     if (!values.repo) {
       await showToast({ style: Toast.Style.Failure, title: "Select a repository" });
       return;
@@ -74,6 +67,9 @@ export default function CreateIssueCommand() {
         repoFullName: values.repo,
         idea: values.idea,
         priorityHint: values.priority || undefined,
+        typeHint: values.type || undefined,
+        sizeHint: values.size || undefined,
+        cachedLabelSet: labelSet ?? undefined,
         onStatus: (msg) => {
           toast.message = msg;
         },
@@ -81,8 +77,8 @@ export default function CreateIssueCommand() {
       {
         githubToken: prefs.githubToken,
         ollamaUrl: prefs.ollamaUrl || "http://localhost:11434",
-        model: prefs.model || "llama4:latest",
-        fallbackModel: prefs.fallbackModel || "llama3.2:latest",
+        model: prefs.model || "mlx-community/Qwen3.5-27B-4bit",
+        fallbackModel: prefs.fallbackModel || "",
       }
     );
 
@@ -107,7 +103,7 @@ export default function CreateIssueCommand() {
   if (reposError) {
     return (
       <Detail
-        markdown={`## Failed to Load Repositories\n\n${reposError}\n\nCheck your GitHub token and organization in preferences.`}
+        markdown={`## Failed to Load Repositories\n\n${reposError.message}\n\nCheck your GitHub token and organization in preferences.`}
         actions={
           <ActionPanel>
             <Action title="Open Preferences" onAction={openExtensionPreferences} />
@@ -127,15 +123,30 @@ export default function CreateIssueCommand() {
         </ActionPanel>
       }
     >
-      <Form.Dropdown id="repo" title="Repository" storeValue>
+      <Form.Dropdown id="repo" title="Repository" storeValue onChange={setSelectedRepo}>
         {repos.map((r) => (
           <Form.Dropdown.Item key={r.fullName} value={r.fullName} title={r.name} />
         ))}
       </Form.Dropdown>
 
+      <Form.Dropdown id="type" title="Type" storeValue>
+        <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
+        {(labelSet?.typeLabels ?? []).map((l) => (
+          <Form.Dropdown.Item key={l} value={l} title={labelDisplayName(l)} />
+        ))}
+      </Form.Dropdown>
+
       <Form.Dropdown id="priority" title="Priority" storeValue>
-        {PRIORITIES.map((p) => (
-          <Form.Dropdown.Item key={p.value} value={p.value} title={p.label} />
+        <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
+        {(labelSet?.priorityLabels ?? DEFAULT_PRIORITIES).map((l) => (
+          <Form.Dropdown.Item key={l} value={l} title={labelDisplayName(l)} />
+        ))}
+      </Form.Dropdown>
+
+      <Form.Dropdown id="size" title="Size" storeValue>
+        <Form.Dropdown.Item key="" value="" title="Auto (AI decides)" />
+        {(labelSet?.sizeLabels ?? []).map((l) => (
+          <Form.Dropdown.Item key={l} value={l} title={labelDisplayName(l)} />
         ))}
       </Form.Dropdown>
 

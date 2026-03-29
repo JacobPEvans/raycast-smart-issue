@@ -1,11 +1,11 @@
-import { generateIssue, GenerateStats, getAvailableModel, sanitizeInput } from "./ollama";
+import { generateIssue, GenerateStats, getAvailableModel, sanitizeInput } from "./llm";
 import { createIssue, getOpenIssues, getRepo, getRepoLabels, searchSimilar } from "./github";
 import { buildPrompt } from "./prompt";
 import { CreateResult, getSuggestedLabels, issueToMarkdown, LabelSet, Repo } from "./types";
 
 export interface CorePreferences {
   githubToken: string;
-  ollamaUrl: string;
+  ollamaUrl: string; // legacy key name — actually any OpenAI-compatible endpoint
   model: string;
   fallbackModel: string;
 }
@@ -14,6 +14,9 @@ export interface CoreInput {
   repoFullName: string;
   idea: string;
   priorityHint?: string;
+  typeHint?: string;
+  sizeHint?: string;
+  cachedLabelSet?: LabelSet;
   onStatus?: (message: string) => void;
 }
 
@@ -28,41 +31,38 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
     return { success: false, error: formatError(err, "github") };
   }
 
-  status("Fetching open issues...");
-  let openIssues: string[] = [];
-  try {
-    openIssues = await getOpenIssues(prefs.githubToken, repo);
-  } catch {
-    // Non-fatal — continue without open issues context
-  }
-
-  status("Fetching available labels...");
-  let labelSet: LabelSet = { typeLabels: [], priorityLabels: [], sizeLabels: [], aiLabels: [], otherLabels: [] };
-  try {
-    labelSet = await getRepoLabels(prefs.githubToken, repo);
-  } catch {
-    // Non-fatal — continue without label context
-  }
-
-  status("Searching for similar issues...");
+  // Fetch context in parallel — these are independent
+  status("Fetching context...");
   const keywords = input.idea.replace(/\W+/g, " ").trim().slice(0, 100);
-  let similar = [];
-  try {
-    similar = await searchSimilar(prefs.githubToken, repo, keywords);
-  } catch {
-    // Non-fatal
-  }
+  const emptyLabelSet: LabelSet = { typeLabels: [], priorityLabels: [], sizeLabels: [], aiLabels: [], otherLabels: [] };
+
+  const [openIssues, labelSet, similar, model] = await Promise.all([
+    getOpenIssues(prefs.githubToken, repo).catch(() => [] as string[]),
+    input.cachedLabelSet
+      ? Promise.resolve(input.cachedLabelSet)
+      : getRepoLabels(prefs.githubToken, repo.fullName).catch(() => emptyLabelSet),
+    searchSimilar(prefs.githubToken, repo, keywords).catch(() => []),
+    getAvailableModel(prefs.model, prefs.fallbackModel, prefs.ollamaUrl),
+  ]);
 
   status("Generating issue with AI...");
   const idea = sanitizeInput(input.idea);
-  const model = await getAvailableModel(prefs.model, prefs.fallbackModel, prefs.ollamaUrl);
-  const prompt = buildPrompt({ idea, repo, openIssues, similar, labelSet, priorityHint: input.priorityHint });
+  const prompt = buildPrompt({
+    idea,
+    repo,
+    openIssues,
+    similar,
+    labelSet,
+    priorityHint: input.priorityHint,
+    typeHint: input.typeHint,
+    sizeHint: input.sizeHint,
+  });
 
   let result: Awaited<ReturnType<typeof generateIssue>>;
   try {
     result = await generateIssue(prompt, model, prefs.ollamaUrl);
   } catch (err) {
-    return { success: false, error: formatError(err, "ollama") };
+    return { success: false, error: formatError(err, "llm") };
   }
 
   if (result.duplicateOf !== null) {
@@ -112,10 +112,10 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
   };
 }
 
-function formatError(err: unknown, context: "github" | "ollama"): string {
+function formatError(err: unknown, context: "github" | "llm"): string {
   const msg = err instanceof Error ? err.message : String(err);
-  if (context === "ollama") {
-    return `${msg}\n\nTip: Ensure Ollama is running (ollama serve)`;
+  if (context === "llm") {
+    return `${msg}\n\nTip: Ensure vllm-mlx is running (check: launchctl list | grep vllm-mlx)`;
   }
   if (context === "github") {
     if (msg.toLowerCase().includes("auth") || msg.toLowerCase().includes("401")) {

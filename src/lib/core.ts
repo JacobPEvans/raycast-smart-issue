@@ -5,7 +5,7 @@ import { CreateResult, getSuggestedLabels, issueToMarkdown, LabelSet, Repo } fro
 
 export interface CorePreferences {
   githubToken: string;
-  ollamaUrl: string; // legacy key name — actually any OpenAI-compatible endpoint
+  llmUrl: string;
   model: string;
   fallbackModel: string;
 }
@@ -42,7 +42,7 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
       ? Promise.resolve(input.cachedLabelSet)
       : getRepoLabels(prefs.githubToken, repo.fullName).catch(() => emptyLabelSet),
     searchSimilar(prefs.githubToken, repo, keywords).catch(() => []),
-    getAvailableModel(prefs.model, prefs.fallbackModel, prefs.ollamaUrl),
+    getAvailableModel(prefs.model, prefs.fallbackModel, prefs.llmUrl),
   ]);
 
   status("Generating issue with AI...");
@@ -60,7 +60,7 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
 
   let result: Awaited<ReturnType<typeof generateIssue>>;
   try {
-    result = await generateIssue(prompt, model, prefs.ollamaUrl);
+    result = await generateIssue(prompt, model, prefs.llmUrl);
   } catch (err) {
     return { success: false, error: formatError(err, "llm") };
   }

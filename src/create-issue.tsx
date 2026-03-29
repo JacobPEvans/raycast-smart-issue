@@ -18,7 +18,7 @@ import { CreateResult } from "./lib/types";
 interface Prefs {
   githubToken: string;
   githubOrg: string;
-  ollamaUrl: string;
+  llmUrl: string;
   model: string;
   fallbackModel: string;
 }
@@ -76,7 +76,7 @@ export default function CreateIssueCommand() {
       },
       {
         githubToken: prefs.githubToken,
-        ollamaUrl: prefs.ollamaUrl || "http://localhost:11434",
+        llmUrl: prefs.llmUrl || "http://localhost:11434",
         model: prefs.model || "mlx-community/Qwen3.5-27B-4bit",
         fallbackModel: prefs.fallbackModel || "",
       }

@@ -36,12 +36,11 @@ TypeScript Raycast extension using `@raycast/api` + `@raycast/utils`.
 - **useCachedPromise** from `@raycast/utils` for all async data (repos, labels)
 - **Dynamic label dropdowns** populated per-repo via `getRepoLabels`
 - **Parallel fetches** via `Promise.all` in `createSmartIssue`
-- **OpenAI-compatible API** — `/v1/models` and `/v1/chat/completions` (NOT Ollama API)
-- Preference key `ollamaUrl` kept for backward compat — actually any OpenAI-compatible endpoint
+- **OpenAI-compatible API** — `/v1/models` and `/v1/chat/completions`
 
 ### LLM integration
 
-vllm-mlx runs as a LaunchAgent on port 11434 (intentional — same port Ollama used).
+vllm-mlx runs as a LaunchAgent on port 11434.
 Model defaults to `mlx-community/Qwen3.5-27B-4bit`. Empty fallback = auto-detect from `/v1/models`.
 
 ## Dependencies

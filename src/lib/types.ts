@@ -66,7 +66,7 @@ export interface CreateResult {
 export interface Preferences {
   githubToken: string;
   githubOrg: string;
-  ollamaUrl: string;
+  llmUrl: string;
   model: string;
   fallbackModel: string;
 }

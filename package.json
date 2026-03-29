@@ -31,7 +31,7 @@
       "required": true
     },
     {
-      "name": "ollamaUrl",
+      "name": "llmUrl",
       "title": "LLM Server URL",
       "description": "Local LLM inference endpoint (OpenAI-compatible)",
       "type": "textfield",

@@ -12,7 +12,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
-import { CreateResult, LabelSet } from "./lib/types";
+import { CreateResult, LabelSet, Repo } from "./lib/types";
 
 interface Prefs {
   githubToken: string;
@@ -57,10 +57,8 @@ export default function CreateIssueCommand() {
 
   async function handleRepoChange(repoFullName: string) {
     latestRepoRef.current = repoFullName;
-    if (!repoFullName) {
-      setLabelSet(null);
-      return;
-    }
+    setLabelSet(null); // clear immediately to avoid showing stale labels
+    if (!repoFullName) return;
     try {
       const labels = await getRepoLabels(prefs.githubToken, repoFullName);
       if (latestRepoRef.current !== repoFullName) return; // stale response

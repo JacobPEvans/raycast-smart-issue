@@ -56,7 +56,7 @@ export interface GenerateResult {
   stats: GenerateStats;
 }
 
-export async function generateIssue(prompt: string, model: string, ollamaUrl: string): Promise<GenerateResult> {
+export async function generateIssue(prompt: string, model: string, llmUrl: string): Promise<GenerateResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 

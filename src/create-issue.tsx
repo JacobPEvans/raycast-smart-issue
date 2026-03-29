@@ -9,10 +9,11 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { useEffect, useRef, useState } from "react";
+import { useCachedPromise } from "@raycast/utils";
+import { useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
-import { CreateResult, LabelSet, Repo } from "./lib/types";
+import { CreateResult, LabelSet } from "./lib/types";
 
 interface Prefs {
   githubToken: string;
@@ -33,42 +34,17 @@ function labelDisplayName(label: string): string {
 export default function CreateIssueCommand() {
   const prefs = getPreferenceValues<Prefs>();
   const { push } = useNavigation();
+  const [selectedRepo, setSelectedRepo] = useState("");
 
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [reposLoading, setReposLoading] = useState(true);
-  const [reposError, setReposError] = useState<string | null>(null);
-  const [labelSet, setLabelSet] = useState<LabelSet | null>(null);
-  const latestRepoRef = useRef("");
+  const {
+    data: repos,
+    isLoading: reposLoading,
+    error: reposError,
+  } = useCachedPromise(getRepos, [prefs.githubToken, prefs.githubOrg], { initialData: [] });
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const fetched = await getRepos(prefs.githubToken, prefs.githubOrg);
-        setRepos(fetched);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setReposError(msg);
-      } finally {
-        setReposLoading(false);
-      }
-    }
-    load();
-  }, [prefs.githubToken, prefs.githubOrg]);
-
-  async function handleRepoChange(repoFullName: string) {
-    latestRepoRef.current = repoFullName;
-    setLabelSet(null); // clear immediately to avoid showing stale labels
-    if (!repoFullName) return;
-    try {
-      const labels = await getRepoLabels(prefs.githubToken, repoFullName);
-      if (latestRepoRef.current !== repoFullName) return; // stale response
-      setLabelSet(labels);
-    } catch {
-      if (latestRepoRef.current !== repoFullName) return;
-      setLabelSet(null);
-      await showToast({ style: Toast.Style.Failure, title: "Failed to load labels" });
-    }
-  }
+  const { data: labelSet } = useCachedPromise(getRepoLabels, [prefs.githubToken, selectedRepo], {
+    execute: !!selectedRepo,
+  });
 
   async function handleSubmit(values: { repo: string; type: string; priority: string; size: string; idea: string }) {
     if (!values.repo) {
@@ -127,7 +103,7 @@ export default function CreateIssueCommand() {
   if (reposError) {
     return (
       <Detail
-        markdown={`## Failed to Load Repositories\n\n${reposError}\n\nCheck your GitHub token and organization in preferences.`}
+        markdown={`## Failed to Load Repositories\n\n${reposError.message}\n\nCheck your GitHub token and organization in preferences.`}
         actions={
           <ActionPanel>
             <Action title="Open Preferences" onAction={openExtensionPreferences} />
@@ -147,7 +123,7 @@ export default function CreateIssueCommand() {
         </ActionPanel>
       }
     >
-      <Form.Dropdown id="repo" title="Repository" storeValue onChange={handleRepoChange}>
+      <Form.Dropdown id="repo" title="Repository" storeValue onChange={setSelectedRepo}>
         {repos.map((r) => (
           <Form.Dropdown.Item key={r.fullName} value={r.fullName} title={r.name} />
         ))}

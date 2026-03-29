@@ -26,11 +26,7 @@ function sanitizeInput(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-export async function getAvailableModel(
-  primaryModel: string,
-  fallbackModel: string,
-  llmUrl: string
-): Promise<string> {
+export async function getAvailableModel(primaryModel: string, fallbackModel: string, llmUrl: string): Promise<string> {
   try {
     const resp = await fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return primaryModel;

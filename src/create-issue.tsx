@@ -13,7 +13,7 @@ import { useCachedPromise } from "@raycast/utils";
 import { useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
-import { CreateResult, LabelSet } from "./lib/types";
+import { CreateResult } from "./lib/types";
 
 interface Prefs {
   githubToken: string;

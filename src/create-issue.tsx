@@ -76,9 +76,9 @@ export default function CreateIssueCommand() {
       },
       {
         githubToken: prefs.githubToken,
-        llmUrl: prefs.llmUrl || "http://localhost:11434",
-        model: prefs.model || "mlx-community/Qwen3.5-27B-4bit",
-        fallbackModel: prefs.fallbackModel || "",
+        llmUrl: prefs.llmUrl,
+        model: prefs.model,
+        fallbackModel: prefs.fallbackModel,
       }
     );
 

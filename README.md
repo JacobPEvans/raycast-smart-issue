@@ -13,7 +13,8 @@ AI-powered GitHub issue creation using local LLM inference. Describe your idea b
 ## Installation
 
 ```bash
-cd ~/git/raycast-smart-issue
+git clone https://github.com/JacobPEvans/raycast-smart-issue.git
+cd raycast-smart-issue
 direnv allow          # Activates Nix devShell (Node.js 22 + Bun)
 bun install           # Install dependencies
 bun run dev           # Link extension to Raycast with hot reload
@@ -23,7 +24,7 @@ bun run dev           # Link extension to Raycast with hot reload
 
 ### 1. Local LLM Server
 
-Ensure vllm-mlx is running on port 11434 (managed via LaunchAgent on this system):
+Ensure an OpenAI-compatible LLM server is running on port 11434 (e.g., [vllm-mlx](https://github.com/vllm-project/vllm)):
 
 ```bash
 # Verify the server is up

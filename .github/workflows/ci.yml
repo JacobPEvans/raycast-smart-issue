@@ -11,6 +11,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: npm install --package-lock-only --ignore-scripts
+      - name: Generate package-lock.json for ray lint validation
+        run: npm install --package-lock-only --ignore-scripts
       - run: bun run build
       - run: bun run lint

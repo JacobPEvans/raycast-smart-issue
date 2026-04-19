@@ -135,7 +135,7 @@ export async function generateIssue(
           { role: "user", content: messages.user },
         ],
         temperature: 0,
-        max_tokens: 4096,
+        max_tokens: 1024,
         stream: false,
       }),
       signal: controller.signal,

@@ -28,6 +28,7 @@ export interface GenerateStats {
 
 const MAX_INPUT_LENGTH = 1000;
 const GENERATE_TIMEOUT_MS = 180_000;
+const MAX_COMPLETION_TOKENS = 1024;
 
 function sanitizeInput(text: string): string {
   if (text.length > MAX_INPUT_LENGTH) {
@@ -135,7 +136,7 @@ export async function generateIssue(
           { role: "user", content: messages.user },
         ],
         temperature: 0,
-        max_tokens: 4096,
+        max_tokens: MAX_COMPLETION_TOKENS,
         stream: false,
       }),
       signal: controller.signal,

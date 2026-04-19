@@ -37,14 +37,20 @@ function sanitizeInput(text: string): string {
 }
 
 async function fetchReadyModelId(llmUrl: string): Promise<string> {
+  if (!llmUrl) return "";
   const resp = await fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
   if (!resp?.ok) return "";
-  const data = (await resp.json()) as RunningResponse;
-  return data.running.find((m) => m.state === "ready")?.model ?? "";
+  try {
+    const data = (await resp.json()) as RunningResponse;
+    return data.running.find((m) => m.state === "ready")?.model ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** Fetch all available models and identify which one is currently loaded. */
 export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
+  if (!llmUrl) return [];
   const [modelsResp, loadedModelId] = await Promise.all([
     fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
     fetchReadyModelId(llmUrl),
@@ -56,7 +62,15 @@ export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
     }
     return [];
   }
-  const modelsData = (await modelsResp.json()) as ModelsResponse;
+  let modelsData: ModelsResponse;
+  try {
+    modelsData = (await modelsResp.json()) as ModelsResponse;
+  } catch {
+    if (loadedModelId) {
+      return [{ id: loadedModelId, displayName: loadedModelId.replace(/^mlx-community\//, ""), loaded: true }];
+    }
+    return [];
+  }
 
   const models: ModelInfo[] = modelsData.data.map((m) => ({
     id: m.id,
@@ -77,14 +91,19 @@ export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
 /** Resolve the model to use: explicit selection or currently loaded model. */
 export async function resolveModel(model: string | undefined, llmUrl: string): Promise<string> {
   if (model) return model;
+  if (!llmUrl) return "";
   const [loadedModelId, modelsResp] = await Promise.all([
     fetchReadyModelId(llmUrl),
     fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
   ]);
   if (loadedModelId) return loadedModelId;
   if (modelsResp?.ok) {
-    const data = (await modelsResp.json()) as ModelsResponse;
-    if (data.data[0]?.id) return data.data[0].id;
+    try {
+      const data = (await modelsResp.json()) as ModelsResponse;
+      if (data.data[0]?.id) return data.data[0].id;
+    } catch {
+      // ignore parse failure
+    }
   }
   return "";
 }
@@ -166,14 +185,20 @@ function parseIssueResponse(content: string): GitHubIssue {
     );
   }
 
-  // Use lastIndexOf for ---TITLE--- to skip any reasoning preamble that echoes the delimiter.
-  // Then use relative indexOf for subsequent delimiters to prevent false matches in generated content.
-  const titleStart = content.lastIndexOf("---TITLE---") + "---TITLE---".length;
-  const titleEnd = content.indexOf("---BODY---", titleStart);
-  const title = content.slice(titleStart, titleEnd).trim();
+  // Anchor on the last ---END--- and work backwards to find ---BODY--- then ---TITLE---.
+  // This handles both reasoning preambles (which echo delimiters) and delimiter strings
+  // that might appear inside generated content.
+  const endIdx = content.lastIndexOf("---END---");
+  const searchBound = endIdx !== -1 ? endIdx : content.length;
 
-  const bodyStart = titleEnd + "---BODY---".length;
-  const endIdx = content.indexOf("---END---", bodyStart);
+  const bodyIdx = content.lastIndexOf("---BODY---", searchBound);
+  if (bodyIdx === -1) throw new Error("AI response missing ---BODY--- delimiter");
+
+  const titleIdx = content.lastIndexOf("---TITLE---", bodyIdx);
+  if (titleIdx === -1) throw new Error("AI response missing ---TITLE--- delimiter");
+
+  const title = content.slice(titleIdx + "---TITLE---".length, bodyIdx).trim();
+  const bodyStart = bodyIdx + "---BODY---".length;
   const bodyEnd = endIdx !== -1 ? endIdx : content.length;
   const body = content.slice(bodyStart, bodyEnd).trim();
 

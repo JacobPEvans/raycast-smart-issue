@@ -9,7 +9,7 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { useCachedPromise } from "@raycast/utils";
+import { useCachedPromise, usePromise } from "@raycast/utils";
 import { useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
@@ -45,9 +45,7 @@ export default function CreateIssueCommand() {
     execute: !!selectedRepo,
   });
 
-  const { data: models, isLoading: modelsLoading } = useCachedPromise(fetchModels, [prefs.llmUrl], {
-    initialData: [],
-  });
+  const { data: models, isLoading: modelsLoading } = usePromise(fetchModels, [prefs.llmUrl]);
 
   async function handleSubmit(values: {
     repo: string;
@@ -147,7 +145,7 @@ export default function CreateIssueCommand() {
       </Form.Dropdown>
 
       <Form.Dropdown id="model" title="Model" storeValue>
-        {models.map((m) => (
+        {(models ?? []).map((m) => (
           <Form.Dropdown.Item
             key={m.id}
             value={m.id}

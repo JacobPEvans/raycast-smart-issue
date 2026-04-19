@@ -9,6 +9,16 @@ interface ModelsResponse {
   data: Array<{ id: string }>;
 }
 
+interface RunningResponse {
+  running: Array<{ model: string; state: string }>;
+}
+
+export interface ModelInfo {
+  id: string;
+  displayName: string;
+  loaded: boolean;
+}
+
 export interface GenerateStats {
   tokens: number;
   durationSec: number;
@@ -17,7 +27,7 @@ export interface GenerateStats {
 }
 
 const MAX_INPUT_LENGTH = 1000;
-const GENERATE_TIMEOUT_MS = 120_000;
+const GENERATE_TIMEOUT_MS = 180_000;
 
 function sanitizeInput(text: string): string {
   if (text.length > MAX_INPUT_LENGTH) {
@@ -26,24 +36,61 @@ function sanitizeInput(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-export async function getAvailableModel(primaryModel: string, fallbackModel: string, llmUrl: string): Promise<string> {
+/** Fetch all available models and identify which one is currently loaded. */
+export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
+  const [modelsResp, runningResp] = await Promise.all([
+    fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }),
+    fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+  ]);
+
+  if (!modelsResp.ok) throw new Error(`LLM server returned ${modelsResp.status} on /v1/models`);
+  const modelsData = (await modelsResp.json()) as ModelsResponse;
+
+  let loadedModelId = "";
+  if (runningResp?.ok) {
+    const runningData = (await runningResp.json()) as RunningResponse;
+    const ready = runningData.running.find((m) => m.state === "ready");
+    loadedModelId = ready?.model ?? "";
+  }
+
+  const models: ModelInfo[] = modelsData.data.map((m) => ({
+    id: m.id,
+    displayName: m.id.replace(/^mlx-community\//, ""),
+    loaded: m.id === loadedModelId,
+  }));
+
+  // Sort: loaded model first, rest alphabetically
+  models.sort((a, b) => {
+    if (a.loaded) return -1;
+    if (b.loaded) return 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  return models;
+}
+
+/** Resolve the model to use: explicit selection or currently loaded model. */
+export async function resolveModel(model: string | undefined, llmUrl: string): Promise<string> {
+  if (model) return model;
+  try {
+    const resp = await fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) throw new Error("no running endpoint");
+    const data = (await resp.json()) as RunningResponse;
+    const ready = data.running.find((m) => m.state === "ready");
+    if (ready?.model) return ready.model;
+  } catch {
+    // fall through to models list
+  }
   try {
     const resp = await fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return primaryModel;
-    const data = (await resp.json()) as ModelsResponse;
-    const names = data.data.map((m) => m.id);
-
-    for (const preferred of [primaryModel, fallbackModel]) {
-      if (!preferred) continue;
-      const base = preferred.split(":")[0];
-      if (names.includes(preferred) || names.some((n) => n.startsWith(base))) {
-        return preferred;
-      }
+    if (resp.ok) {
+      const data = (await resp.json()) as ModelsResponse;
+      if (data.data[0]?.id) return data.data[0].id;
     }
-    return names[0] ?? primaryModel;
   } catch {
-    return primaryModel;
+    // give up
   }
+  return "";
 }
 
 export interface GenerateResult {
@@ -52,7 +99,11 @@ export interface GenerateResult {
   stats: GenerateStats;
 }
 
-export async function generateIssue(prompt: string, model: string, llmUrl: string): Promise<GenerateResult> {
+export async function generateIssue(
+  messages: { system: string; user: string },
+  model: string,
+  llmUrl: string
+): Promise<GenerateResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
@@ -64,9 +115,12 @@ export async function generateIssue(prompt: string, model: string, llmUrl: strin
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: messages.system },
+          { role: "user", content: messages.user },
+        ],
         temperature: 0,
-        max_tokens: 2048,
+        max_tokens: 4096,
         stream: false,
       }),
       signal: controller.signal,
@@ -92,11 +146,15 @@ export async function generateIssue(prompt: string, model: string, llmUrl: strin
   const content = raw.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error("LLM server returned empty response");
 
-  // Check for duplicate
-  if (content.startsWith("DUPLICATE:#")) {
-    const num = parseInt(content.split("#")[1]?.trim() ?? "", 10);
-    if (isNaN(num)) throw new Error(`Invalid duplicate format: ${content}`);
-    return { issue: null, duplicateOf: num, stats };
+  // DUPLICATE check — search anywhere in content since models may add preamble
+  const dupIdx = content.lastIndexOf("DUPLICATE:#");
+  if (dupIdx !== -1) {
+    // Make sure this is a standalone DUPLICATE response, not a mention in the body
+    const afterDup = content.slice(dupIdx + "DUPLICATE:#".length);
+    const num = parseInt(afterDup.trim().split(/\s/)[0] ?? "", 10);
+    if (!isNaN(num)) {
+      return { issue: null, duplicateOf: num, stats };
+    }
   }
 
   return { issue: parseIssueResponse(content), duplicateOf: null, stats };
@@ -109,12 +167,14 @@ function parseIssueResponse(content: string): GitHubIssue {
     );
   }
 
-  const titleStart = content.indexOf("---TITLE---") + "---TITLE---".length;
-  const titleEnd = content.indexOf("---BODY---");
+  // Use lastIndexOf: models often echo delimiters in their reasoning before producing the real output
+  const titleStart = content.lastIndexOf("---TITLE---") + "---TITLE---".length;
+  const titleEnd = content.lastIndexOf("---BODY---");
   const title = content.slice(titleStart, titleEnd).trim();
 
-  const bodyStart = content.indexOf("---BODY---") + "---BODY---".length;
-  const bodyEnd = content.includes("---END---") ? content.indexOf("---END---") : content.length;
+  const bodyStart = content.lastIndexOf("---BODY---") + "---BODY---".length;
+  const endIdx = content.lastIndexOf("---END---");
+  const bodyEnd = endIdx !== -1 ? endIdx : content.length;
   const body = content.slice(bodyStart, bodyEnd).trim();
 
   // Parse body sections
@@ -146,15 +206,15 @@ function parseIssueResponse(content: string): GitHubIssue {
     }
   }
 
-  // Parse labels section
+  // Parse labels section — use last occurrence in case model echoed the format
   let typeLabel: string | undefined;
   let priorityLabel: string | undefined;
   let sizeLabel: string | undefined;
 
-  if (content.includes("---LABELS---") && content.includes("---LABELS-END---")) {
-    const lStart = content.indexOf("---LABELS---") + "---LABELS---".length;
-    const lEnd = content.indexOf("---LABELS-END---");
-    const labelsSection = content.slice(lStart, lEnd).trim();
+  const labelsStart = content.lastIndexOf("---LABELS---");
+  const labelsEnd = content.lastIndexOf("---LABELS-END---");
+  if (labelsStart !== -1 && labelsEnd !== -1 && labelsEnd > labelsStart) {
+    const labelsSection = content.slice(labelsStart + "---LABELS---".length, labelsEnd).trim();
     for (const line of labelsSection.split("\n")) {
       const t = line.trim();
       if (t.startsWith("type:")) typeLabel = t.slice("type:".length).trim();

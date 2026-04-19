@@ -67,6 +67,4 @@ export interface Preferences {
   githubToken: string;
   githubOrg: string;
   llmUrl: string;
-  model: string;
-  fallbackModel: string;
 }

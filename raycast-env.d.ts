@@ -13,11 +13,7 @@ type ExtensionPreferences = {
   /** GitHub Organization/User - Your GitHub username or org for fetching repos */
   "githubOrg": string,
   /** LLM Server URL - Local LLM inference endpoint (OpenAI-compatible) */
-  "llmUrl": string,
-  /** AI Model - Model for issue generation */
-  "model": string,
-  /** Fallback Model - Used when primary model is unavailable (empty = auto-detect) */
-  "fallbackModel": string
+  "llmUrl": string
 }
 
 /** Preferences accessible in all the extension's commands */

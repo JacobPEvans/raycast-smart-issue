@@ -1,7 +1,0 @@
-name: Auto Merge
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-jobs:
-  auto-merge:
-    uses: JacobPEvans/.github/.github/workflows/_auto-merge.yml@main

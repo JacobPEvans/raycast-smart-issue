@@ -147,17 +147,14 @@ export default function CreateIssueCommand() {
       </Form.Dropdown>
 
       <Form.Dropdown id="model" title="Model" storeValue>
-        {models.length === 0 ? (
-          <Form.Dropdown.Item key="" value="" title="Auto (use loaded model)" />
-        ) : (
-          models.map((m) => (
-            <Form.Dropdown.Item
-              key={m.id}
-              value={m.id}
-              title={m.loaded ? `${m.displayName} (loaded — fastest)` : m.displayName}
-            />
-          ))
-        )}
+        {models.map((m) => (
+          <Form.Dropdown.Item
+            key={m.id}
+            value={m.id}
+            title={m.loaded ? `${m.displayName} (loaded — fastest)` : m.displayName}
+          />
+        ))}
+        <Form.Dropdown.Item key="" value="" title="Auto (follow loaded model)" />
       </Form.Dropdown>
 
       <Form.Dropdown id="type" title="Type" storeValue>

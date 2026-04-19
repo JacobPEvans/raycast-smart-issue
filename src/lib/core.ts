@@ -44,6 +44,10 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
     resolveModel(input.model, prefs.llmUrl),
   ]);
 
+  if (!model) {
+    return { success: false, error: "No model available; check LLM server" };
+  }
+
   status("Generating issue with AI...");
   const idea = sanitizeInput(input.idea);
   const messages = buildPrompt({

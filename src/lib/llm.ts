@@ -46,11 +46,16 @@ async function fetchReadyModelId(llmUrl: string): Promise<string> {
 /** Fetch all available models and identify which one is currently loaded. */
 export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
   const [modelsResp, loadedModelId] = await Promise.all([
-    fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }),
+    fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
     fetchReadyModelId(llmUrl),
   ]);
 
-  if (!modelsResp.ok) throw new Error(`LLM server returned ${modelsResp.status} on /v1/models`);
+  if (!modelsResp?.ok) {
+    if (loadedModelId) {
+      return [{ id: loadedModelId, displayName: loadedModelId.replace(/^mlx-community\//, ""), loaded: true }];
+    }
+    return [];
+  }
   const modelsData = (await modelsResp.json()) as ModelsResponse;
 
   const models: ModelInfo[] = modelsData.data.map((m) => ({
@@ -137,14 +142,17 @@ export async function generateIssue(
   const content = raw.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error("LLM server returned empty response");
 
-  // DUPLICATE check — search anywhere in content since models may add preamble
-  const dupIdx = content.lastIndexOf("DUPLICATE:#");
-  if (dupIdx !== -1) {
-    // Make sure this is a standalone DUPLICATE response, not a mention in the body
-    const afterDup = content.slice(dupIdx + "DUPLICATE:#".length);
-    const num = parseInt(afterDup.trim().split(/\s/)[0] ?? "", 10);
-    if (!isNaN(num)) {
-      return { issue: null, duplicateOf: num, stats };
+  // DUPLICATE check — exact match takes precedence. Fallback: standalone token only when no
+  // structured delimiters are present (prevents body mentions from being mistaken for a duplicate).
+  const trimmedContent = content.trim();
+  const exactDupMatch = trimmedContent.match(/^DUPLICATE:#(\d+)$/);
+  if (exactDupMatch) {
+    return { issue: null, duplicateOf: parseInt(exactDupMatch[1], 10), stats };
+  }
+  if (!content.includes("---TITLE---")) {
+    const looseDupMatch = trimmedContent.match(/(?:^|\s)DUPLICATE:#(\d+)(?=\s|$)/);
+    if (looseDupMatch) {
+      return { issue: null, duplicateOf: parseInt(looseDupMatch[1], 10), stats };
     }
   }
 
@@ -158,13 +166,14 @@ function parseIssueResponse(content: string): GitHubIssue {
     );
   }
 
-  // Use lastIndexOf: models often echo delimiters in their reasoning before producing the real output
+  // Use lastIndexOf for ---TITLE--- to skip any reasoning preamble that echoes the delimiter.
+  // Then use relative indexOf for subsequent delimiters to prevent false matches in generated content.
   const titleStart = content.lastIndexOf("---TITLE---") + "---TITLE---".length;
-  const titleEnd = content.lastIndexOf("---BODY---");
+  const titleEnd = content.indexOf("---BODY---", titleStart);
   const title = content.slice(titleStart, titleEnd).trim();
 
-  const bodyStart = content.lastIndexOf("---BODY---") + "---BODY---".length;
-  const endIdx = content.lastIndexOf("---END---");
+  const bodyStart = titleEnd + "---BODY---".length;
+  const endIdx = content.indexOf("---END---", bodyStart);
   const bodyEnd = endIdx !== -1 ? endIdx : content.length;
   const body = content.slice(bodyStart, bodyEnd).trim();
 
@@ -197,13 +206,13 @@ function parseIssueResponse(content: string): GitHubIssue {
     }
   }
 
-  // Parse labels section — use last occurrence in case model echoed the format
+  // Parse labels section — search after bodyEnd to avoid matching echoed examples in reasoning
   let typeLabel: string | undefined;
   let priorityLabel: string | undefined;
   let sizeLabel: string | undefined;
 
-  const labelsStart = content.lastIndexOf("---LABELS---");
-  const labelsEnd = content.lastIndexOf("---LABELS-END---");
+  const labelsStart = content.indexOf("---LABELS---", bodyEnd);
+  const labelsEnd = labelsStart !== -1 ? content.indexOf("---LABELS-END---", labelsStart) : -1;
   if (labelsStart !== -1 && labelsEnd !== -1 && labelsEnd > labelsStart) {
     const labelsSection = content.slice(labelsStart + "---LABELS---".length, labelsEnd).trim();
     for (const line of labelsSection.split("\n")) {

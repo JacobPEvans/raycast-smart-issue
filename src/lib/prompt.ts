@@ -11,76 +11,50 @@ export interface PromptContext {
   sizeHint?: string;
 }
 
-export function buildPrompt(ctx: PromptContext): string {
+export function buildPrompt(ctx: PromptContext): { system: string; user: string } {
+  const system = `You are a GitHub issue writer. Create well-structured issues from brief ideas. Respond directly with the specified format — no preamble, reasoning, or thinking.`;
+
   const similarText = ctx.similar.length > 0 ? ctx.similar.map((s) => `- #${s.number} ${s.title}`).join("\n") : "None";
   const openText = ctx.openIssues.slice(0, 15).join("\n") || "None";
-  const repoInfo = `${ctx.repo.name}: ${ctx.repo.description}`;
 
-  let labelGuidance = "";
+  let labelsBlock = "";
   if (
     ctx.labelSet.typeLabels.length > 0 ||
     ctx.labelSet.priorityLabels.length > 0 ||
     ctx.labelSet.sizeLabels.length > 0
   ) {
-    labelGuidance = "\nAVAILABLE LABELS (choose exactly ONE from each category that has labels):\n";
-    if (ctx.labelSet.typeLabels.length > 0) {
-      labelGuidance += `  Type: ${ctx.labelSet.typeLabels.join(", ")}\n`;
-    }
-    if (ctx.labelSet.priorityLabels.length > 0) {
-      labelGuidance += `  Priority: ${ctx.labelSet.priorityLabels.join(", ")}\n`;
-    }
-    if (ctx.labelSet.sizeLabels.length > 0) {
-      labelGuidance += `  Size: ${ctx.labelSet.sizeLabels.join(", ")}\n`;
-    }
+    const lines: string[] = ["Choose exactly ONE from each category that applies:"];
+    if (ctx.labelSet.typeLabels.length > 0) lines.push(`  Type: ${ctx.labelSet.typeLabels.join(", ")}`);
+    if (ctx.labelSet.priorityLabels.length > 0) lines.push(`  Priority: ${ctx.labelSet.priorityLabels.join(", ")}`);
+    if (ctx.labelSet.sizeLabels.length > 0) lines.push(`  Size: ${ctx.labelSet.sizeLabels.join(", ")}`);
+    labelsBlock = `<labels>\n${lines.join("\n")}\n</labels>\n\n`;
   }
 
-  let preferenceHints = "";
   const hints: string[] = [];
-  if (ctx.typeHint) hints.push(`User prefers ${ctx.typeHint} (but override if inappropriate)`);
-  if (ctx.priorityHint) hints.push(`User hints at ${ctx.priorityHint} (but override if needed)`);
-  if (ctx.sizeHint) hints.push(`User suggests ${ctx.sizeHint} (but override if inaccurate)`);
-  if (hints.length > 0) {
-    preferenceHints = `\nUSER PREFERENCES (you can override with reasoning):\n${hints.map((h) => `  - ${h}`).join("\n")}\n`;
-  }
+  if (ctx.typeHint) hints.push(`User prefers ${ctx.typeHint} (override if inappropriate)`);
+  if (ctx.priorityHint) hints.push(`User hints at ${ctx.priorityHint} (override if needed)`);
+  if (ctx.sizeHint) hints.push(`User suggests ${ctx.sizeHint} (override if inaccurate)`);
+  const prefsBlock =
+    hints.length > 0 ? `<preferences>\n${hints.map((h) => `- ${h}`).join("\n")}\n</preferences>\n\n` : "";
 
-  const ideaParsingInstructions = `
-IDEA TEXT PARSING:
-If the user's idea starts with conventional commit prefixes, map them to types:
-  - feat: → type:feature, fix: → type:bug, docs: → type:docs
-  - chore: → type:chore, refactor: → type:refactor, test: → type:test
-  - perf: → type:perf, ci: → type:ci, breaking: → type:breaking
-
-If the idea contains hints like "size:s", "priority:high", extract and use them.
-
-When creating the title/description, strip these prefixes - they're metadata.
-`;
-
-  const labelInstruction =
-    labelGuidance.length > 0
-      ? `
-After ---END---, optionally add label suggestions (one per line):
----LABELS---
-type:<label>
-priority:<label>
-size:<label>
----LABELS-END---`
+  const labelInstructions =
+    labelsBlock.length > 0
+      ? `\nAfter ---END---, add label suggestions:\n---LABELS---\ntype:<label>\npriority:<label>\nsize:<label>\n---LABELS-END---`
       : "";
 
-  return `You are a GitHub issue writer. Create a well-structured issue from this idea.
-
-IDEA: ${ctx.idea}
-
-REPOSITORY: ${repoInfo}
-
-OPEN ISSUES:
+  const user = `<context>
+<repository>${ctx.repo.name}: ${ctx.repo.description}</repository>
+<open_issues>
 ${openText}
-
-SIMILAR ISSUES:
+</open_issues>
+<similar_issues>
 ${similarText}
-${labelGuidance}${preferenceHints}${ideaParsingInstructions}
-Instructions:
-1. If a similar issue fully covers this idea, respond ONLY: DUPLICATE:#<number>
-2. Otherwise, output EXACTLY this format (no extra text):
+</similar_issues>
+</context>
+
+${labelsBlock}${prefsBlock}<format>
+If a similar issue fully covers this idea, respond ONLY: DUPLICATE:#<number>
+Otherwise output EXACTLY:
 ---TITLE---
 <concise title, max 80 chars>
 ---BODY---
@@ -94,5 +68,38 @@ Instructions:
 - [ ] <criterion 1>
 - [ ] <criterion 2>
 - [ ] <criterion 3>
----END---${labelInstruction}`;
+---END---${labelInstructions}
+</format>
+
+<example>
+---TITLE---
+Add retry logic for failed webhook deliveries
+---BODY---
+## Summary
+Webhook deliveries currently fail silently with no retry, causing missed events when downstream services are temporarily unavailable.
+
+## Details
+Implement exponential backoff retry with configurable max attempts. Failed deliveries should be logged and eventually dead-lettered for manual inspection.
+
+## Acceptance Criteria
+- [ ] Failed webhooks retry up to 3 times with exponential backoff (1s, 2s, 4s)
+- [ ] All retry attempts are logged with attempt number and error
+- [ ] Permanently failed deliveries are written to a dead letter queue
+---END---
+---LABELS---
+type:feature
+priority:medium
+size:m
+---LABELS-END---
+</example>
+
+<idea_parsing>
+Map conventional commit prefixes to types: feat: → type:feature, fix: → type:bug, docs: → type:docs, chore: → type:chore, refactor: → type:refactor, test: → type:test, perf: → type:perf, ci: → type:ci
+Extract inline hints like "size:s", "priority:high" from the idea text.
+Strip these prefixes from the title — they are metadata only.
+</idea_parsing>
+
+IDEA: ${ctx.idea}`;
+
+  return { system, user };
 }

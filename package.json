@@ -37,22 +37,6 @@
       "type": "textfield",
       "default": "http://localhost:11434",
       "required": false
-    },
-    {
-      "name": "model",
-      "title": "AI Model",
-      "description": "Model for issue generation",
-      "type": "textfield",
-      "default": "mlx-community/Qwen3.5-27B-4bit",
-      "required": false
-    },
-    {
-      "name": "fallbackModel",
-      "title": "Fallback Model",
-      "description": "Used when primary model is unavailable (empty = auto-detect)",
-      "type": "textfield",
-      "default": "",
-      "required": false
     }
   ],
   "dependencies": {

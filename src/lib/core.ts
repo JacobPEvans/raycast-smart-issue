@@ -1,4 +1,4 @@
-import { generateIssue, GenerateStats, getAvailableModel, sanitizeInput } from "./llm";
+import { generateIssue, GenerateStats, resolveModel, sanitizeInput } from "./llm";
 import { createIssue, getOpenIssues, getRepo, getRepoLabels, searchSimilar } from "./github";
 import { buildPrompt } from "./prompt";
 import { CreateResult, getSuggestedLabels, issueToMarkdown, LabelSet, Repo } from "./types";
@@ -6,13 +6,12 @@ import { CreateResult, getSuggestedLabels, issueToMarkdown, LabelSet, Repo } fro
 export interface CorePreferences {
   githubToken: string;
   llmUrl: string;
-  model: string;
-  fallbackModel: string;
 }
 
 export interface CoreInput {
   repoFullName: string;
   idea: string;
+  model?: string;
   priorityHint?: string;
   typeHint?: string;
   sizeHint?: string;
@@ -42,12 +41,16 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
       ? Promise.resolve(input.cachedLabelSet)
       : getRepoLabels(prefs.githubToken, repo.fullName).catch(() => emptyLabelSet),
     searchSimilar(prefs.githubToken, repo, keywords).catch(() => []),
-    getAvailableModel(prefs.model, prefs.fallbackModel, prefs.llmUrl),
+    resolveModel(input.model, prefs.llmUrl),
   ]);
+
+  if (!model) {
+    return { success: false, error: "No model available; check LLM server" };
+  }
 
   status("Generating issue with AI...");
   const idea = sanitizeInput(input.idea);
-  const prompt = buildPrompt({
+  const messages = buildPrompt({
     idea,
     repo,
     openIssues,
@@ -60,7 +63,7 @@ export async function createSmartIssue(input: CoreInput, prefs: CorePreferences)
 
   let result: Awaited<ReturnType<typeof generateIssue>>;
   try {
-    result = await generateIssue(prompt, model, prefs.llmUrl);
+    result = await generateIssue(messages, model, prefs.llmUrl);
   } catch (err) {
     return { success: false, error: formatError(err, "llm") };
   }

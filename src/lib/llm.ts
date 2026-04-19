@@ -9,6 +9,16 @@ interface ModelsResponse {
   data: Array<{ id: string }>;
 }
 
+interface RunningResponse {
+  running: Array<{ model: string; state: string }>;
+}
+
+export interface ModelInfo {
+  id: string;
+  displayName: string;
+  loaded: boolean;
+}
+
 export interface GenerateStats {
   tokens: number;
   durationSec: number;
@@ -17,7 +27,7 @@ export interface GenerateStats {
 }
 
 const MAX_INPUT_LENGTH = 1000;
-const GENERATE_TIMEOUT_MS = 120_000;
+const GENERATE_TIMEOUT_MS = 180_000;
 
 function sanitizeInput(text: string): string {
   if (text.length > MAX_INPUT_LENGTH) {
@@ -26,24 +36,76 @@ function sanitizeInput(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-export async function getAvailableModel(primaryModel: string, fallbackModel: string, llmUrl: string): Promise<string> {
+async function fetchReadyModelId(llmUrl: string): Promise<string> {
+  if (!llmUrl) return "";
+  const resp = await fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
+  if (!resp?.ok) return "";
   try {
-    const resp = await fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return primaryModel;
-    const data = (await resp.json()) as ModelsResponse;
-    const names = data.data.map((m) => m.id);
-
-    for (const preferred of [primaryModel, fallbackModel]) {
-      if (!preferred) continue;
-      const base = preferred.split(":")[0];
-      if (names.includes(preferred) || names.some((n) => n.startsWith(base))) {
-        return preferred;
-      }
-    }
-    return names[0] ?? primaryModel;
+    const data = (await resp.json()) as RunningResponse;
+    return data.running.find((m) => m.state === "ready")?.model ?? "";
   } catch {
-    return primaryModel;
+    return "";
   }
+}
+
+/** Fetch all available models and identify which one is currently loaded. */
+export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
+  if (!llmUrl) return [];
+  const [modelsResp, loadedModelId] = await Promise.all([
+    fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+    fetchReadyModelId(llmUrl),
+  ]);
+
+  if (!modelsResp?.ok) {
+    if (loadedModelId) {
+      return [{ id: loadedModelId, displayName: loadedModelId.replace(/^mlx-community\//, ""), loaded: true }];
+    }
+    return [];
+  }
+  let modelsData: ModelsResponse;
+  try {
+    modelsData = (await modelsResp.json()) as ModelsResponse;
+  } catch {
+    if (loadedModelId) {
+      return [{ id: loadedModelId, displayName: loadedModelId.replace(/^mlx-community\//, ""), loaded: true }];
+    }
+    return [];
+  }
+
+  const models: ModelInfo[] = modelsData.data.map((m) => ({
+    id: m.id,
+    displayName: m.id.replace(/^mlx-community\//, ""),
+    loaded: m.id === loadedModelId,
+  }));
+
+  // Sort: loaded model first, rest alphabetically
+  models.sort((a, b) => {
+    if (a.loaded) return -1;
+    if (b.loaded) return 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  return models;
+}
+
+/** Resolve the model to use: explicit selection or currently loaded model. */
+export async function resolveModel(model: string | undefined, llmUrl: string): Promise<string> {
+  if (model) return model;
+  if (!llmUrl) return "";
+  const [loadedModelId, modelsResp] = await Promise.all([
+    fetchReadyModelId(llmUrl),
+    fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+  ]);
+  if (loadedModelId) return loadedModelId;
+  if (modelsResp?.ok) {
+    try {
+      const data = (await modelsResp.json()) as ModelsResponse;
+      if (data.data[0]?.id) return data.data[0].id;
+    } catch {
+      // ignore parse failure
+    }
+  }
+  return "";
 }
 
 export interface GenerateResult {
@@ -52,7 +114,11 @@ export interface GenerateResult {
   stats: GenerateStats;
 }
 
-export async function generateIssue(prompt: string, model: string, llmUrl: string): Promise<GenerateResult> {
+export async function generateIssue(
+  messages: { system: string; user: string },
+  model: string,
+  llmUrl: string
+): Promise<GenerateResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
@@ -64,9 +130,12 @@ export async function generateIssue(prompt: string, model: string, llmUrl: strin
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: messages.system },
+          { role: "user", content: messages.user },
+        ],
         temperature: 0,
-        max_tokens: 2048,
+        max_tokens: 4096,
         stream: false,
       }),
       signal: controller.signal,
@@ -92,11 +161,18 @@ export async function generateIssue(prompt: string, model: string, llmUrl: strin
   const content = raw.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error("LLM server returned empty response");
 
-  // Check for duplicate
-  if (content.startsWith("DUPLICATE:#")) {
-    const num = parseInt(content.split("#")[1]?.trim() ?? "", 10);
-    if (isNaN(num)) throw new Error(`Invalid duplicate format: ${content}`);
-    return { issue: null, duplicateOf: num, stats };
+  // DUPLICATE check — exact match takes precedence. Fallback: standalone token only when no
+  // structured delimiters are present (prevents body mentions from being mistaken for a duplicate).
+  const trimmedContent = content.trim();
+  const exactDupMatch = trimmedContent.match(/^DUPLICATE:#(\d+)$/);
+  if (exactDupMatch) {
+    return { issue: null, duplicateOf: parseInt(exactDupMatch[1], 10), stats };
+  }
+  if (!content.includes("---TITLE---")) {
+    const looseDupMatch = trimmedContent.match(/(?:^|\s)DUPLICATE:#(\d+)(?=\s|$)/);
+    if (looseDupMatch) {
+      return { issue: null, duplicateOf: parseInt(looseDupMatch[1], 10), stats };
+    }
   }
 
   return { issue: parseIssueResponse(content), duplicateOf: null, stats };
@@ -109,12 +185,21 @@ function parseIssueResponse(content: string): GitHubIssue {
     );
   }
 
-  const titleStart = content.indexOf("---TITLE---") + "---TITLE---".length;
-  const titleEnd = content.indexOf("---BODY---");
-  const title = content.slice(titleStart, titleEnd).trim();
+  // Anchor on the last ---END--- and work backwards to find ---BODY--- then ---TITLE---.
+  // This handles both reasoning preambles (which echo delimiters) and delimiter strings
+  // that might appear inside generated content.
+  const endIdx = content.lastIndexOf("---END---");
+  const searchBound = endIdx !== -1 ? endIdx : content.length;
 
-  const bodyStart = content.indexOf("---BODY---") + "---BODY---".length;
-  const bodyEnd = content.includes("---END---") ? content.indexOf("---END---") : content.length;
+  const bodyIdx = content.lastIndexOf("---BODY---", searchBound);
+  if (bodyIdx === -1) throw new Error("AI response missing ---BODY--- delimiter");
+
+  const titleIdx = content.lastIndexOf("---TITLE---", bodyIdx);
+  if (titleIdx === -1) throw new Error("AI response missing ---TITLE--- delimiter");
+
+  const title = content.slice(titleIdx + "---TITLE---".length, bodyIdx).trim();
+  const bodyStart = bodyIdx + "---BODY---".length;
+  const bodyEnd = endIdx !== -1 ? endIdx : content.length;
   const body = content.slice(bodyStart, bodyEnd).trim();
 
   // Parse body sections
@@ -146,15 +231,15 @@ function parseIssueResponse(content: string): GitHubIssue {
     }
   }
 
-  // Parse labels section
+  // Parse labels section — search after bodyEnd to avoid matching echoed examples in reasoning
   let typeLabel: string | undefined;
   let priorityLabel: string | undefined;
   let sizeLabel: string | undefined;
 
-  if (content.includes("---LABELS---") && content.includes("---LABELS-END---")) {
-    const lStart = content.indexOf("---LABELS---") + "---LABELS---".length;
-    const lEnd = content.indexOf("---LABELS-END---");
-    const labelsSection = content.slice(lStart, lEnd).trim();
+  const labelsStart = content.indexOf("---LABELS---", bodyEnd);
+  const labelsEnd = labelsStart !== -1 ? content.indexOf("---LABELS-END---", labelsStart) : -1;
+  if (labelsStart !== -1 && labelsEnd !== -1 && labelsEnd > labelsStart) {
+    const labelsSection = content.slice(labelsStart + "---LABELS---".length, labelsEnd).trim();
     for (const line of labelsSection.split("\n")) {
       const t = line.trim();
       if (t.startsWith("type:")) typeLabel = t.slice("type:".length).trim();

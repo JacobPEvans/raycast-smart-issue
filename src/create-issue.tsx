@@ -13,14 +13,13 @@ import { useCachedPromise } from "@raycast/utils";
 import { useState } from "react";
 import { createSmartIssue } from "./lib/core";
 import { getRepoLabels, getRepos } from "./lib/github";
+import { fetchModels } from "./lib/llm";
 import { CreateResult } from "./lib/types";
 
 interface Prefs {
   githubToken: string;
   githubOrg: string;
   llmUrl: string;
-  model: string;
-  fallbackModel: string;
 }
 
 const DEFAULT_PRIORITIES = ["priority:critical", "priority:high", "priority:medium", "priority:low"];
@@ -46,7 +45,18 @@ export default function CreateIssueCommand() {
     execute: !!selectedRepo,
   });
 
-  async function handleSubmit(values: { repo: string; type: string; priority: string; size: string; idea: string }) {
+  const { data: models, isLoading: modelsLoading } = useCachedPromise(fetchModels, [prefs.llmUrl], {
+    initialData: [],
+  });
+
+  async function handleSubmit(values: {
+    repo: string;
+    model: string;
+    type: string;
+    priority: string;
+    size: string;
+    idea: string;
+  }) {
     if (!values.repo) {
       await showToast({ style: Toast.Style.Failure, title: "Select a repository" });
       return;
@@ -62,40 +72,47 @@ export default function CreateIssueCommand() {
       message: "Connecting to GitHub...",
     });
 
-    const result = await createSmartIssue(
-      {
-        repoFullName: values.repo,
-        idea: values.idea,
-        priorityHint: values.priority || undefined,
-        typeHint: values.type || undefined,
-        sizeHint: values.size || undefined,
-        cachedLabelSet: labelSet ?? undefined,
-        onStatus: (msg) => {
-          toast.message = msg;
+    try {
+      const result = await createSmartIssue(
+        {
+          repoFullName: values.repo,
+          idea: values.idea,
+          model: values.model || undefined,
+          priorityHint: values.priority || undefined,
+          typeHint: values.type || undefined,
+          sizeHint: values.size || undefined,
+          cachedLabelSet: labelSet ?? undefined,
+          onStatus: (msg) => {
+            toast.message = msg;
+          },
         },
-      },
-      {
-        githubToken: prefs.githubToken,
-        llmUrl: prefs.llmUrl,
-        model: prefs.model,
-        fallbackModel: prefs.fallbackModel,
-      }
-    );
+        {
+          githubToken: prefs.githubToken,
+          llmUrl: prefs.llmUrl,
+        }
+      );
 
-    if (result.success) {
-      await toast.hide();
-      push(<IssueSuccessDetail result={result} repoFullName={values.repo} />);
-    } else if (result.duplicateOf) {
+      if (result.success) {
+        await toast.hide();
+        push(<IssueSuccessDetail result={result} repoFullName={values.repo} />);
+      } else if (result.duplicateOf) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Duplicate Issue Detected",
+          message: `This appears to be a duplicate of #${result.duplicateOf}`,
+        });
+      } else {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Failed to Create Issue",
+          message: result.error ?? "Unknown error",
+        });
+      }
+    } catch (err) {
       await showToast({
         style: Toast.Style.Failure,
-        title: "Duplicate Issue Detected",
-        message: `This appears to be a duplicate of #${result.duplicateOf}`,
-      });
-    } else {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to Create Issue",
-        message: result.error ?? "Unknown error",
+        title: "Unexpected Error",
+        message: err instanceof Error ? err.message : String(err),
       });
     }
   }
@@ -115,7 +132,7 @@ export default function CreateIssueCommand() {
 
   return (
     <Form
-      isLoading={reposLoading}
+      isLoading={reposLoading || modelsLoading}
       enableDrafts
       actions={
         <ActionPanel>
@@ -127,6 +144,17 @@ export default function CreateIssueCommand() {
         {repos.map((r) => (
           <Form.Dropdown.Item key={r.fullName} value={r.fullName} title={r.name} />
         ))}
+      </Form.Dropdown>
+
+      <Form.Dropdown id="model" title="Model" storeValue>
+        {models.map((m) => (
+          <Form.Dropdown.Item
+            key={m.id}
+            value={m.id}
+            title={m.loaded ? `${m.displayName} (loaded — fastest)` : m.displayName}
+          />
+        ))}
+        <Form.Dropdown.Item key="" value="" title="Auto (follow loaded model)" />
       </Form.Dropdown>
 
       <Form.Dropdown id="type" title="Type" storeValue>

@@ -36,22 +36,22 @@ function sanitizeInput(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+async function fetchReadyModelId(llmUrl: string): Promise<string> {
+  const resp = await fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
+  if (!resp?.ok) return "";
+  const data = (await resp.json()) as RunningResponse;
+  return data.running.find((m) => m.state === "ready")?.model ?? "";
+}
+
 /** Fetch all available models and identify which one is currently loaded. */
 export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
-  const [modelsResp, runningResp] = await Promise.all([
+  const [modelsResp, loadedModelId] = await Promise.all([
     fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }),
-    fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+    fetchReadyModelId(llmUrl),
   ]);
 
   if (!modelsResp.ok) throw new Error(`LLM server returned ${modelsResp.status} on /v1/models`);
   const modelsData = (await modelsResp.json()) as ModelsResponse;
-
-  let loadedModelId = "";
-  if (runningResp?.ok) {
-    const runningData = (await runningResp.json()) as RunningResponse;
-    const ready = runningData.running.find((m) => m.state === "ready");
-    loadedModelId = ready?.model ?? "";
-  }
 
   const models: ModelInfo[] = modelsData.data.map((m) => ({
     id: m.id,
@@ -72,23 +72,14 @@ export async function fetchModels(llmUrl: string): Promise<ModelInfo[]> {
 /** Resolve the model to use: explicit selection or currently loaded model. */
 export async function resolveModel(model: string | undefined, llmUrl: string): Promise<string> {
   if (model) return model;
-  try {
-    const resp = await fetch(`${llmUrl}/running`, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) throw new Error("no running endpoint");
-    const data = (await resp.json()) as RunningResponse;
-    const ready = data.running.find((m) => m.state === "ready");
-    if (ready?.model) return ready.model;
-  } catch {
-    // fall through to models list
-  }
-  try {
-    const resp = await fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
-    if (resp.ok) {
-      const data = (await resp.json()) as ModelsResponse;
-      if (data.data[0]?.id) return data.data[0].id;
-    }
-  } catch {
-    // give up
+  const [loadedModelId, modelsResp] = await Promise.all([
+    fetchReadyModelId(llmUrl),
+    fetch(`${llmUrl}/v1/models`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+  ]);
+  if (loadedModelId) return loadedModelId;
+  if (modelsResp?.ok) {
+    const data = (await modelsResp.json()) as ModelsResponse;
+    if (data.data[0]?.id) return data.data[0].id;
   }
   return "";
 }

@@ -130,8 +130,6 @@ export default function CreateIssueCommand() {
     );
   }
 
-  const loadedModel = models.find((m) => m.loaded);
-
   return (
     <Form
       isLoading={reposLoading || modelsLoading}
@@ -149,20 +147,17 @@ export default function CreateIssueCommand() {
       </Form.Dropdown>
 
       <Form.Dropdown id="model" title="Model" storeValue>
-        {loadedModel ? (
-          <Form.Dropdown.Item
-            key={loadedModel.id}
-            value={loadedModel.id}
-            title={`${loadedModel.displayName} (loaded — fastest)`}
-          />
-        ) : (
+        {models.length === 0 ? (
           <Form.Dropdown.Item key="" value="" title="Auto (use loaded model)" />
+        ) : (
+          models.map((m) => (
+            <Form.Dropdown.Item
+              key={m.id}
+              value={m.id}
+              title={m.loaded ? `${m.displayName} (loaded — fastest)` : m.displayName}
+            />
+          ))
         )}
-        {models
-          .filter((m) => !m.loaded)
-          .map((m) => (
-            <Form.Dropdown.Item key={m.id} value={m.id} title={m.displayName} />
-          ))}
       </Form.Dropdown>
 
       <Form.Dropdown id="type" title="Type" storeValue>

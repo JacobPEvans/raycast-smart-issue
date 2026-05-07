@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
     paths: ['**/*.md']
+permissions:
+  contents: read
 jobs:
   lint:
     uses: JacobPEvans/.github/.github/workflows/_markdown-lint.yml@main
